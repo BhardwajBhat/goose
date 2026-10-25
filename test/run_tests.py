@@ -2357,6 +2357,16 @@ def main():
     if cc or jit:
         r.show_task(resource_paths)
 
+    def jit_runtime():
+        from jit_runtime import check_jit_runtime
+        try:
+            check_jit_runtime(exe, gendir)
+            r.ok("embedded JIT runtime: bundled files, exit/abort statuses and resource roots")
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            r.fail("embedded JIT runtime", str(e))
+    if jit:
+        r.show_task(jit_runtime)
+
     def git_packages():
         from packages_git import check_git_packages
         try:

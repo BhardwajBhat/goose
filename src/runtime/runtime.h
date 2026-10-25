@@ -13,12 +13,13 @@
    platform's headers, which no program's unit includes, and is built one
    of two ways:
 
-   - Standalone (`goose --standalone`, and every JIT run): one translation
+   - Standalone (`goose --standalone`): one translation
      unit holds it all, and everything the runtime defines is static.
-   - Separate (`goose -o`'s default): the program's unit declares the rest
+   - Separate (JIT and `goose -o`'s default): the program's unit declares the rest
      extern (GS_SEPARATE_RUNTIME), and `goose --emit-runtime` writes it out
      as a C file of its own (GS_RUNTIME_OBJECT), compiled once and linked
-     with every program. That object takes no configuration of its own: the
+     with every program. JIT uses the same interface to the runtime built
+     into Goose. That object takes no configuration of its own: the
      program hands it the data stack sizes as it starts (gs_rt_init), it
      always supports threads, and it holds the checks of debug and release
      builds alike, so one object serves every program a compiler emits.
@@ -49,12 +50,14 @@
 #define _DEFAULT_SOURCE 1
 #endif
 
+#ifndef GS_EMBEDDED_JIT
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#endif
 
 /* Goose values can start at any byte, including scalars reached through a
    reference or slice. GCC and Clang must retain that alignment on the
