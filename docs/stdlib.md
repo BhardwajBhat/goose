@@ -408,9 +408,10 @@ inspired by [Lobster's exception module](https://github.com/aardappel/lobster/bl
 Import `exception`; its functions are in namespace `exception`.
 
 ```goose
-fn try<E, Body, Catch>()     // Body(); on an error, Catch(error)
-fn try<E, Body>()            // Body(); discard an error
-fn throw(value)             // exit the nearest enclosing handler
+fn try<E, Body, Catch>()            // Body(); on an error, Catch(error)
+fn try<E, Body>()                   // Body(); discard an error
+fn try<E, Body, Catch, Finally>()   // as the first, then Finally() on every way out
+fn throw(value)                    // exit the nearest enclosing handler
 ```
 
 ```goose
@@ -459,10 +460,11 @@ The language's checks and limitations still apply:
 * Only calls to `throw` are caught. Runtime failures, `abort` and `exit`
   remain uncatchable. There is no stack-trace facility.
 
-There is no `protect`/`finally` helper because it could not guarantee cleanup on
-every exit. A callback can clean up after normal completion or a caught
-exception. However, a block's lexical `return` or a `return ... from` targeting
-another function bypasses that callback.
+`try<E>(body, catch, finally)` runs `finally` after the body completes, after
+a caught throw, and when a throw or a lexical `return` aimed at another
+function leaves through the call. It is `defer finally();` ahead of the try
+(reference, "defer"), so `finally` follows the rules of a defer body: it
+cannot leave, and it may not throw, catch, or call anything that does.
 
 ## dictionary
 

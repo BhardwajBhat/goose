@@ -581,6 +581,11 @@ struct CodeGen {
         int kind;
         int stkbase;
         vector<pair<string, string>> saves;   // (stack expr, base var) to restore.
+        // The `defer` bodies registered in this scope (§6.6), each with how
+        // many saves came before it: an exit runs them among the restores,
+        // latest first, each before the release of the storage declared
+        // before it (EmitRestores).
+        vector<pair<size_t, Defer *>> defers;
         SFunction *ibsf = nullptr;            // SC_IB: which returns exit here.
         string brklbl, cntlbl;
         bool usedbrk = false, usedcnt = false;
@@ -761,6 +766,8 @@ struct CodeGen {
     void EmitRestores(const CScope &s);
     void PopSc();
     void EmitExitRestores(int to);
+    void RegisterDefer(Defer *d);
+    void EmitDeferBody(Defer *d);
     string AllocStk(bool forlocal);
     void SaveBase(bool forlocal, const string &stk, const string &basevar);
 

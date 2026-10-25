@@ -3713,11 +3713,17 @@ inline bool Call::BceWalk(BCE &b) {
 
 inline bool Block::BceWalk(BCE &b) {
     auto fell = true;
+    auto defers = false;
     for (auto st : stmts) {
         fell = b.Walk(st);
         if (!fell) break;
+        defers = defers || Is<Defer>(st);
     }
     if (fell) b.Walk(tail);
+    // The deferred bodies run as the block ends (Defer::BceWalk).
+    if (fell && defers)
+        for (auto st : stmts)
+            if (auto d = Is<Defer>(st)) b.StripKills(d->body);
     return fell;
 }
 
@@ -4065,6 +4071,27 @@ inline bool Break::BceWalk(BCE &b) {
 }
 
 inline bool Continue::BceWalk(BCE &) { return false; }
+
+// A deferred body runs at every exit of its block, not where it is written
+// (§6.6). Its checks are judged without the facts that hold here, since a
+// write between here and an exit may have undone them, and what it kills is
+// killed from here on, which covers the exits inside the block, and once
+// more at the block's end for the facts stated after it (Block::BceWalk). A
+// loop or `block` left by a break strips its whole body's kills after it,
+// this body's among them, and a loop's entry strips its body's, which a
+// continue returns to.
+inline bool Defer::BceWalk(BCE &b) {
+    if (b.mode != BCE::M_KILLS) {
+        auto saved = std::move(b.flow);
+        b.flow = BCE::Flow {};
+        b.loopdepth++;
+        b.Walk(body);
+        b.loopdepth--;
+        b.flow = std::move(saved);
+    }
+    b.StripKills(body);
+    return true;
+}
 
 inline bool VarDecl::BceWalk(BCE &b) {
     for (auto i : inits) b.Walk(i);

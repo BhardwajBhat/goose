@@ -1133,8 +1133,10 @@ where its body's value names a variable (§9.2).
 
 There is no ownership transfer beyond the return move, no destructors, no
 `Drop`, no reference counting. The only deallocation is scope exit resetting
-stack pointers. (A `move` operation for resizable arrays, which assigns and
-leaves the source empty, is anticipated but not in v1.)
+stack pointers. A `defer` (§6.6) runs code the program writes at a block's
+exit; it is tied to the block, not to a value, and releases no memory
+itself. (A `move` operation for resizable arrays, which assigns and leaves
+the source empty, is anticipated but not in v1.)
 
 Copying a variable or resizable value costs O(size). The explicit `copy`
 marks that cost in the source.
@@ -2355,6 +2357,52 @@ construction rules. Returns retain their lexical targets; a `break` or
 `continue` cannot cross an expansion boundary. The full v1 rules and
 implementation limit are in [the `const for` design](design/const_for.md).
 
+### 6.6 `defer`
+
+```goose
+defer stmt;                  // an assignment, an increment, or an expression statement
+defer { … }                  // a block
+```
+
+A `defer` statement's body runs when the block the statement is written in
+ends, by any exit: the end of the block's text, `break`, `continue`,
+`return`, a function value's `return` (§7.6) through the call running it,
+or a `return … from` (§7.9) passing through the function. It runs once per
+exit of the block, so a `defer` in a loop's body runs at the end of every
+iteration. An exit runs the bodies of the `defer` statements it has run
+past in the blocks it leaves, innermost block first and latest first within
+a block, so a body runs before the storage declared before it is released
+and may read it. The body is evaluated at the exit, not where it is
+written: it reads variables as they are then. At a `return`, the returned
+value is constructed at its destination first (§7.3), then the bodies run,
+then the block's storage is released.
+
+Restrictions, all checked statically:
+
+* The body cannot leave: no `return`, `break` or `continue` in it may
+  target anything outside it, a `return` in a function value written in it
+  included.
+* The body uses no long-distance returns: it holds no `return … from`, and
+  calls no function that performs or propagates one, catches one, or calls
+  one that does, transitively. The body may run while such a return is in
+  flight (§7.9), and a second one, a contained throw and catch included,
+  would disturb the first's state.
+* The body does not name a local the function returns by name: that local
+  is built at its result destination (§7.3), and is complete when the body
+  runs.
+* The body is checked where it is written: it names what is declared
+  before it, and a `var` optional narrowed before it is not narrowed in it,
+  since an assignment before an exit may have undone that. What the body
+  assigns is not assigned after the statement, since the body runs at the
+  exits.
+* A `defer` is a statement of a function's body, or of a block in one; a
+  global initializer has no scope exit.
+
+A `defer` body does not run where no exit happens: `abort`, a failed
+`assert` or bounds check, `exit`, a contained worker's abort (§11.2), and
+workers still running when `main` returns. The process or the worker's end
+reclaims what the body would have released.
+
 ---
 
 ## 7. Functions
@@ -2547,7 +2595,9 @@ holds part of a value: for example inside an element of a literal being
 built there, or, for a `return from` (§7.9), below a named result built in
 the destination the target handed down. Such an exit abandons that part.
 The exit's own value is constructed behind the abandoned part and moved
-down over it; only such an exit needs this copy.
+down over it; only such an exit needs this copy. The `defer` bodies of the
+blocks an exit leaves (§6.6) run after the exit's value is constructed and
+before the blocks' storage is released.
 
 **Destination requests.** The construct-here information handed to a callee
 (or any constructing expression) comes in one of two forms, chosen by the
@@ -3068,8 +3118,11 @@ Semantics and implementation:
   return discriminant: "result is for my caller" vs "propagate for target
   `f`" (an enum when multiple targets are possible). Callers check it and
   immediately return in the propagate case. Normal epilogues run, so all
-  intermediate data-stack watermarks restore correctly. No unwinder or
-  unwind tables are needed, and there are no destructors to run.
+  intermediate data-stack watermarks restore correctly, and the `defer`
+  bodies of the frames left run in them (§6.6); a body uses no
+  long-distance return itself, so the one in flight is undisturbed. No
+  unwinder or unwind tables are needed, and there are no destructors to
+  run.
 * `E`'s destination follows §7.3 for `f`'s call site. No special stack rule
   is needed: a pending nonfixed return's destination stack is in the in-use
   watermark from `f`'s call site through `f`'s entire dynamic extent
@@ -4843,13 +4896,14 @@ postfix     := "[" expr "]"                      // fixed array (const expr)
              | ".."                              // variable-mode ADT
              | "." ident                         // variant type
 
-stmt        := decl | assign | incdec | guardstmt | exprstmt
+stmt        := decl | assign | incdec | guardstmt | deferstmt | exprstmt
 decl        := ("reusable" ("[" "]")?)? ("let" | "var" | "const") identlist (":" type)?
                (("=" | ".=") exprlist)? ";"     // .= binds by reference (§3.8)
 assign      := lvalue assignop expr ";"          // = .= += -= *= /= %= &= |= ^= <<= >>=
 incdec      := lvalue ("++" | "--") ";"
 exprstmt    := expr ";"
 guardstmt   := "guard" expr ("else" blockexpr | ";")  // guards the rest of its block (§6.4)
+deferstmt   := "defer" (blockexpr | assign | incdec | exprstmt)  // runs at the block's exits (§6.6)
 
 expr        := control | binary
 control     := ifexpr | matchexpr | blockexpr | loops | jumps

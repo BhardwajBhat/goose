@@ -3338,6 +3338,7 @@ inline void TypeCheck::CheckStmt(Node *n) {
     if (auto a = Is<Assign>(n)) { CheckAssign(a); return; }
     if (auto x = Is<IncDec>(n)) { CheckIncDec(x); return; }
     if (auto fd = Is<FnDecl>(n)) { DeclareLocalFn(fd); return; }
+    if (auto d = Is<Defer>(n)) { CheckDefer(d); return; }
     CheckStmtExpr(n);
 }
 

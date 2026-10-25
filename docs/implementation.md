@@ -261,6 +261,12 @@ function per construct. Points that matter to later passes:
   in a tail, and as its last statement otherwise. No later pass has a guard
   node, and `--dump` prints the `if`. A guard anywhere other than among a
   block's statements is a parse error.
+* `defer s;` parses to a `Defer` node whose body is a block of the one
+  statement `s`, which is an assignment, an increment, several targets
+  taking a call's results, or an expression statement (`ParseDefer`);
+  `defer { … }` keeps its block. `--dump` writes the statement form back
+  where the body is one statement. Like a guard, a defer is a parse error
+  anywhere but among a block's statements.
 * Recovery (`docs/design/language_server.md` §5 D). When a statement
   raises an error, the error is reported (`Ast::Report`) and the statement
   is dropped. `ParseBlockBody` catches the `CompileError` and then:
@@ -3960,6 +3966,43 @@ when checking shrinking, construction conflicts, optional narrowing and
 when retaining bounds facts. Optimizations may remove effects only after
 the program has passed the language's static checks.
 
+### 3.16 `defer`
+
+A `defer` (§6.6) is checked where it is written (`CheckDefer`). Its body is
+a block in a scope of its own kind (`SK_DEFER`), so a `break` or `continue`
+looking for its loop (`FindBreakScope`) and a `return` of any kind
+(`CheckReturn`, `InDeferBody`) stop at it and are rejected, a `return` in a
+function value written in the body included, since the value's frame is
+lexically inside the body's scopes (`Frame::lexframe`). The flow state the
+body is checked in is the statement's less the narrowing of every `var`,
+which an assignment between the statement and an exit may undo; the flow
+after the statement is the flow before it, since the body's assignments
+happen at exits that nothing in the block observes. The body's stores,
+growths and shrinks are recorded like any statement's, and the lifetime
+rules see the variables live at the statement, which are at least those
+live at any exit.
+
+Two rules need the whole program and run after every root (`CheckDefers`).
+The body may call nothing that uses long-distance return machinery: a
+specialization with a `return … from` site or on a propagation path
+(`FnSpec::needs`), one that catches one, or one that calls either, which is
+one flag per specialization computed as a fixpoint over the call graph; the
+error names the chain of calls. A body runs in the epilogue of a frame a
+long-distance return passes through, while `gs_rf` and the target's
+channels hold the return in flight (§6.6 below), and a contained throw and
+catch in a callee would clear `gs_rf` on its way out, so the rule covers
+the catch too. And the body may not name the local a function returns by
+name (`NamedResultOf`, for a non-fixed result): that local is built at the
+result destination, and the return records its count before the body runs.
+Every identifier a body names of a variable declared outside it is recorded
+as the body is checked (`NoteDeferMention`), through the function values
+and nested functions written in it; a program without a `defer` pays one
+test per identifier for this (`deferbodies`). A nested function the body
+calls, or a named function it passes as a value, may have been checked
+before the `defer` and be reused there, so what such a callee names is read
+from its record of the variables outside its activation
+(`FnSpec::envreads`), which every call site fills, reused or not.
+
 ---
 
 ## 4. The optimizer
@@ -4221,7 +4264,9 @@ calls, so `1 + check(l) + check(r)` loses its right spine only. Parameters
 must be rebindable (scalars, or plain non-fat, non-pool, non-relative
 references whose new value points outside the activation). Tails inside
 loops or function-value bodies are skipped, and a callee that can
-`return ... from` the function disables the transform. The recursion keeps
+`return ... from` the function disables the transform, as does a `defer`
+anywhere in the body, whose run after a tail call's return the loop could
+not reproduce. The recursion keeps
 each caller's locals and by-value parameters alive and unchanged under its
 call, whereas the loop reinitializes and rebinds them for the next
 iteration. So the loop cannot carry a reference that a tail call passes
@@ -4482,6 +4527,12 @@ These invalidate facts:
   (`ChainOf`); as for a place, crossing the root itself does not count as
   reading a stored reference;
 * a rebind of a reference variable (`RebindKill`);
+* a `defer` body (`Defer::BceWalk`), which runs at every exit of its block
+  rather than where it is written: its kills apply where it is written and
+  again where its block ends (`Block::BceWalk`), and the loops and
+  `block`s a break leaves strip their whole body's kills, this body's
+  among them. Its own checks are judged without the facts of its position,
+  which a write before an exit may have undone;
 * a reference stored into a field or an element, either by rebinding one
   held there or by storing a value that holds one (`RefSlotWriteKill`).
   This kills every place whose path reads a stored reference
@@ -4959,7 +5010,14 @@ dedicated stacks outside the indexed block. Scopes mirror C braces
 (`CScope`): every nonfixed local's base pointer doubles as the watermark
 restored at scope exit. Every exit path (fallthrough, `break`, `continue`,
 `return`, propagation) emits the restores of the scopes it leaves, in
-reverse declaration order (`EmitExitRestores`). A statement gets a scope of
+reverse declaration order (`EmitExitRestores`). A `defer` registers its
+body in its block's scope beside the restores (`RegisterDefer`), and every
+exit emits the body where it meets it in that order: after the restores of
+what was declared after it, before those of what was declared before it
+(`EmitRestores`, `EmitDeferBody`). The body is emitted once per exit, in a
+C block of its own, with its declarations named afresh each time
+(`NameScope`); a scope without a `defer` emits as it always did. A
+statement gets a scope of
 its own (`SC_STMT`), so that a temporary's stack is free again at the next
 statement. So does the right operand of `&&` and `||`, whose temporaries
 exist only when it runs. A local's allocation skips the statement scopes
@@ -5339,8 +5397,9 @@ destination stacks for nonfixed ones (`gs_fdst_<id>_<i>`, recorded at the
 target's entry and restored at its exit). A propagating function's ordinary
 exit writes nothing. A call on a propagation path costs one load and a
 never-taken branch, and an intermediate frame returns a dummy value after
-restoring its watermarks. `--unsafe-no-rf-check` omits the checks, for
-measurement only.
+restoring its watermarks and running its `defer` bodies (§6.6), which the
+checker keeps free of this machinery (§3.16). `--unsafe-no-rf-check` omits
+the checks, for measurement only.
 A fixed relative aggregate's `gs_lret` channel is a pointer to the target's
 receiving storage, saved and restored at target entry/exit. The nonlocal
 return constructs through it, and the catch has no value to copy.
