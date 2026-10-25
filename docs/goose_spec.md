@@ -4776,14 +4776,14 @@ count is that header's `len`, so its tail cannot be referenced either.
 
 ### C.4 Guard pages and commit order
 
-Construction rules (§4.2) write stacks front-to-back. Windows and macOS
-commit on fault: the runtime's handler commits a chunk from whichever page
+Construction rules (§4.2) write stacks front-to-back. Windows commits on
+fault: the runtime's handler commits a chunk from whichever page
 was touched, so an allocation that skips ahead without writing (a large
 limited-array capacity) needs no explicit commit, and nothing depends on
-touch order. Linux reserves with overcommit and commits on touch. Fresh
-pages arrive zeroed from the OS. Reused stack memory is not zeroed, and on
-macOS neither is a page that `trim_memory` released and the kernel has not
-reclaimed yet. This is harmless, since uninitialized slots are unreachable
+touch order. macOS and Linux map the usable region read/write and let the
+kernel supply physical pages on touch. Fresh pages, including pages
+discarded by `trim_memory`, arrive zeroed from the OS. Reused stack memory
+is not zeroed. This is harmless, since uninitialized slots are unreachable
 (§5.3). A final gap after each region, never committed, turns runaway
 growth into a safe abort.
 

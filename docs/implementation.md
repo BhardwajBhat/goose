@@ -6113,15 +6113,12 @@ the rest of a partial page committed at its end.
 On Windows, pages are
 committed on fault by a vectored handler that tells a commit from an
 overrun. When the system refuses a commit (because its commit limit is
-reached), the handler reports it as out of memory. macOS also commits on
-fault, through the runtime's signal handler: the whole region is mapped
-`PROT_NONE`, and the handler opens the usable part 1 MB at a time, starting
-from the page that faulted. Linux reserves with overcommit and protects only
-the gap. Runtime C therefore writes to a stack only in user mode (`memcpy`,
+reached), the handler reports it as out of memory. macOS and Linux map the
+usable region read/write and protect only the gap; the kernel supplies
+physical pages on demand, without calling the runtime's signal handler.
+To support Windows, runtime C writes to a stack only in user mode (`memcpy`,
 `gs_bld_append`) and never through a system call, because a system call
-would fail on an unopened page instead of faulting. A debugger sees each
-such fault first (lldb stops on its `EXC_BAD_ACCESS` unless it is passed on
-to the program).
+would fail on an uncommitted page instead of faulting.
 
 If the platform refuses a region (because its address
 space, an address-space limit or strict overcommit accounting is exhausted),
@@ -6148,15 +6145,17 @@ thread program's regions.
 
 **Trimming.** `os.trim_memory` (`gs_trim_memory`) walks the calling thread
 program's registry and gives back each region's complete pages above its
-stack's top. Windows decommits them, macOS marks them reusable
-(`MADV_FREE_REUSABLE`) and closes them again, and Linux drops them with
-`MADV_DONTNEED`. Windows and macOS stop at the highest page the fault
-handler has opened (`gs_region::committed`), so a trim never sweeps the
-whole reservation. macOS also records the stretch it trimmed, so that as
-growth reopens those pages, its handler declares them reused
-(`MADV_FREE_REUSE`) and the footprint counts them again. Each region records
-its stack's descriptor, and the descriptor's top in memory must be current
-at the call. The extern is therefore marked `SFunction::readsalltops`, so
+stack's top. Windows decommits them, stopping at the highest page the fault
+handler has committed (`gs_region::committed`). Linux drops them with
+`MADV_DONTNEED`. macOS replaces the unused suffix of the reservation with
+a fresh read/write anonymous mapping using `MAP_FIXED`. XNU replaces the
+mapping atomically, so another thread cannot claim the addresses during
+the trim. The live partial page and guard gap remain outside that range.
+Trimming covers the full unused reservation on macOS; ordinary allocation
+and regrowth need neither a high-water mark nor a runtime-handled fault.
+Each region records its stack's descriptor, and the descriptor's top in
+memory must be current at the call. The extern is therefore marked
+`SFunction::readsalltops`, so
 that a call to it writes back every cached top. `CodeGen::CollectSpecs`
 marks every function that may reach the extern, and the callers of those
 functions also write back all their cached tops around the call

@@ -177,10 +177,11 @@ mappings and Windows handles across worker churn, including unjoined workers,
 concurrent/repeated waits, children outliving their parents and contained
 workers that abort. The direct `test/runtime/runtime_trim_memory.c` test
 checks that releasing unused data-stack memory decommits the pages on
-Windows, drops them from Linux's resident set and marks them reusable on
-macOS, while keeping live partial pages and other stacks. It also checks
-that growth commits the pages again, through the fault handler on Windows
-and macOS, behind a commit mark that each trim moves. Both run in both
+Windows and drops them from the resident set on Linux and macOS, while
+keeping live partial pages and other stacks. It also checks that discarded
+pages are zeroed, that Windows growth recommits through the fault handler
+behind a commit mark that each trim moves, and that macOS growth needs no
+runtime-handled faults, before or after a trim. Both run in both
 profiles. The normal suite also checks
 user-visible worker error diagnostics.
 

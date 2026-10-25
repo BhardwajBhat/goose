@@ -655,15 +655,13 @@ workload, such as replacing a document, rather than after every temporary
 value. Ordinary scope exit keeps pages available for cheap reuse, while a
 trimmed page causes a page fault when the stack grows into it again.
 
-The
-pages are released immediately. Windows decommits them, which also returns
-their commit charge, and Linux drops them from the resident set at once;
-on both, a stack that grows again gets fresh zeroed pages. macOS marks the
-pages reusable, which takes them out of the footprint at once, and
-declares them reused when the stack grows back into them. A page the
-kernel has not reclaimed by then may still hold its old bytes; nothing
-ever reads the bytes above a stack's top. `false` means at least one OS
-request failed.
+The pages are released immediately. Windows decommits them, which also
+returns their commit charge, and Linux drops them from the resident set
+at once. macOS replaces the unused suffix of each reservation with fresh
+anonymous memory at the same addresses. On all three platforms, a stack
+that grows again gets fresh zeroed pages. macOS trimming covers the full
+unused reservation so ordinary growth needs no runtime tracking or signal
+handling. `false` means at least one OS request failed.
 
 Paths are UTF-8 on every platform; on Windows the runtime converts them to
 UTF-16 for the system's wide APIs. Environment values and the program's
