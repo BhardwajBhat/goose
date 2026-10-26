@@ -238,6 +238,38 @@ GS_API GS_NORETURN void gs_asfail_f(const char *why, double d, int f32, const ch
    results the baseline's, though both have FMA: only math's mul_add uses
    it (GS_MUL_ADD_MODE, below). Elsewhere the versions are left out, and so
    is the choice. -DGS_SIMD=0 or 1 lowers the level; nothing raises it. */
+/* Whole-vector elementwise arithmetic (spec §6.1). Where the C compiler has
+   GCC's vector extensions, an elementwise operation on a struct or fixed
+   array of 2 to 16 floats of one width, 16, 32 or 64 bytes with no padding,
+   is one operation on a vector type of the same layout. Lane by lane it
+   computes what the members do. Elsewhere (MSVC, TinyCC, or -DGS_VEC=0) the
+   operation stays member by member.
+
+   The vector types are aligned(1), since such a value may sit at any
+   address (structs are packed), and may_alias, since the generated code
+   reads and writes the value's memory through them. It uses them only
+   inside expressions: GS_VLD, GS_VST and vector literals, never as a local
+   (the generated code gathers declarations at the top of a function,
+   outside the GS_VEC test) and never as a parameter or result, so code
+   built for one instruction set never hands a vector to code built for
+   another, which the x86-64 ABI forbids for wide vectors. */
+#if !defined(GS_VEC) && (defined(__clang__) || defined(__GNUC__)) && !defined(__TINYC__)
+#define GS_VEC 1
+#endif
+#if GS_VEC
+typedef double gs_vf64_2 __attribute__((vector_size(16), aligned(1), may_alias));
+typedef double gs_vf64_4 __attribute__((vector_size(32), aligned(1), may_alias));
+typedef double gs_vf64_8 __attribute__((vector_size(64), aligned(1), may_alias));
+typedef float gs_vf32_4 __attribute__((vector_size(16), aligned(1), may_alias));
+typedef float gs_vf32_8 __attribute__((vector_size(32), aligned(1), may_alias));
+typedef float gs_vf32_16 __attribute__((vector_size(64), aligned(1), may_alias));
+#define GS_VLD(V, p) (*(const V *)(const void *)(p))
+#define GS_VST(V, p, x) ((void)(*(V *)(void *)(p) = (x)))
+#else
+#undef GS_VEC
+#define GS_VEC 0
+#endif
+
 #if defined(__clang__) && (defined(__x86_64__) || defined(_M_X64)) && !defined(__TINYC__)
 #ifndef GS_SIMD
 #define GS_SIMD 2
