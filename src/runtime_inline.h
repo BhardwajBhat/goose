@@ -347,12 +347,15 @@ static inline int gs_simd_level(void) {
    is built for FMA and twice where it is not, so its results are the
    implementation's (§7.12). GS_MUL_ADD_BASE says which for code built for
    the target as a whole: fused on arm64 and on x86-64 built for AVX2 or
-   past it (-march=x86-64-v3, /arch:AVX2), separate everywhere else and
-   under TinyCC. A simd function's AVX2 and AVX-512 versions have FMA
-   whatever the target, so the compiler sets GS_MUL_ADD_MODE to fused around
-   them, and back to the base after (EmitSimdVersions). */
-#if !defined(__TINYC__) && (defined(__FMA__) || defined(__aarch64__) || defined(_M_ARM64) || \
-                            (defined(_MSC_VER) && defined(__AVX2__)))
+   past it (-march=x86-64-v3, clang-cl's /arch:AVX2), separate everywhere
+   else, under TinyCC and under MSVC. MSVC compiles fma() to a call into the
+   C library, even with /arch:AVX2, which also keeps a loop around it from
+   vectorizing: a matrix multiply ran 2.7x slower fused than separate. A
+   simd function's AVX2 and AVX-512 versions have FMA whatever the target,
+   so the compiler sets GS_MUL_ADD_MODE to fused around them, and back to
+   the base after (EmitSimdVersions). */
+#if !defined(__TINYC__) && !(defined(_MSC_VER) && !defined(__clang__)) && \
+    (defined(__FMA__) || defined(__aarch64__) || defined(_M_ARM64))
 #define GS_MUL_ADD_BASE fused
 #else
 #define GS_MUL_ADD_BASE separate
@@ -386,7 +389,8 @@ R"GSRT(   optimizing backends turn into a few moves. TinyCC calls the C library 
                                   GS_CP(uint64_t, d, s, (n) - 16), GS_CP(uint64_t, d, s, (n) - 8)) \
      : (void)memcpy((d), (s), (n)))
 #define GS_MEMZERO(d, n) \
-    (GS_KSZ(n, 8, 8) ? (void)(GS_AT(uint64_t, d, 0) = 0) \
+)GSRT"
+R"GSRT(    (GS_KSZ(n, 8, 8) ? (void)(GS_AT(uint64_t, d, 0) = 0) \
      : GS_KSZ(n, 4, 4) ? (void)(GS_AT(uint32_t, d, 0) = 0) \
      : GS_KSZ(n, 1, 1) ? (void)(GS_AT(uint8_t, d, 0) = 0) \
      : GS_KSZ(n, 2, 2) ? (void)(GS_AT(uint16_t, d, 0) = 0) \
@@ -548,7 +552,8 @@ R"GSRT(               ? (t) + ((T)(b) < 0 ? -(int64_t)(T)(b) : (int64_t)(T)(b)) 
 
 #if GS_DEBUG
 #define GS_DIVOPS_S(SFX, T, MIN, MAX) \
-static T gs_div_##SFX(T a, T b, const char *file, int line) { \
+)GSRT"
+R"GSRT(static T gs_div_##SFX(T a, T b, const char *file, int line) { \
     if (b == 0) gs_divfail(file, line); \
     int64_t r = (int64_t)a / (int64_t)b; \
     if (r < (MIN) || r > (MAX)) gs_ovf(a, "/", b, #SFX, file, line); \
@@ -721,7 +726,8 @@ static uint64_t gs_div128_u64(uint64_t hi, uint64_t d, uint64_t *rem) {
     *rem = r;
     return q;
 #else
-    unsigned __int128 n = (unsigned __int128)hi << 64;
+)GSRT"
+R"GSRT(    unsigned __int128 n = (unsigned __int128)hi << 64;
     *rem = (uint64_t)(n % d);
     return (uint64_t)(n / d);
 #endif
@@ -918,7 +924,8 @@ GS_API void gs_release_regions(void);
    a platform, that spelling; NULL where the platform derives its own
    (name.dll, libname.dylib, libname.so). */
 typedef struct gs_dllib {
-    const char *name, *onwindows, *onmacos, *onlinux;
+)GSRT"
+R"GSRT(    const char *name, *onwindows, *onmacos, *onlinux;
 } gs_dllib;
 /* One function: its library's index in the table, the symbol the library
    is asked for, and the pointer the generated code calls through. */
@@ -1108,7 +1115,8 @@ static GS_NOINLINE int64_t gs_uleb_size_slow(const uint8_t *p) {
     return gs_uleb_size(p);
 }
 
-#define GS_ULEB_READ(p) ((*(p) & 0x80) ? gs_uleb_read_slow(p) : (int64_t)*(p))
+)GSRT"
+R"GSRT(#define GS_ULEB_READ(p) ((*(p) & 0x80) ? gs_uleb_read_slow(p) : (int64_t)*(p))
 #define GS_ULEB_SIZE(p) ((*(p) & 0x80) ? gs_uleb_size_slow(p) : (int64_t)1)
 
 static int64_t gs_uleb_write(uint8_t *p, uint64_t v) {
