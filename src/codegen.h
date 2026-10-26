@@ -1408,8 +1408,10 @@ struct CodeGen {
     // a later global's initializer naming one is spelled out from.
     map<const VarDef *, Node *> gstatic;
 
-    // Spelling out more elements than this would trade startup work for source
-    // size; such a value keeps its runtime initialization.
+    // Spelling out more elements of a fill or a string than this would trade
+    // startup work for source size; such a value keeps its runtime
+    // initialization, a loop or a copy. Listed elements are spelled out
+    // either way, so their static initializer has no limit.
     static constexpr int64_t MAXSTATICELEMS = 256;
 
     bool StaticInitX(Node *n, TypeExpr *t, string &out);

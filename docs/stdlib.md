@@ -104,9 +104,10 @@ The library uses these conventions:
   §3.9).
 * The `std`, `dictionary`, `vec`, `math`, and `os` names are global;
   `ffi`, `binary`, `base64`, `csv`, `json`, `regex`, `audio`, `gfx`,
-  `physics`, `ui` and `exception` use their own namespaces. A local named
-  `fill` or `count` shadows the global function of that name, so a call to
-  that function is an error. A global variable of such a name does not
+  `physics`, `ui` and `exception` use their own namespaces, and so do the
+  helpers `std` and `json` read and write float text with, in `float_text`.
+  A local named `fill` or `count` shadows the global function of that name,
+  so a call to that function is an error. A global variable of such a name does not
   shadow it, because the name in a call resolves past global variables to
   the functions (spec §11.1).
 
@@ -351,7 +352,7 @@ fn format_int<B>(out: B&, v: i64, base: i64, width: i64, padc: u8)   // base 2..
 fn format_uint<B>(out: B&, v: u64, base: i64, width: i64, padc: u8)   // B: u8[>..] or u8[..k]
 fn format_flt(out: u8[>..]&, v: f64, decimals: i64)        // fixed decimals, rounded half up; inf/-inf/nan as print writes them
 fn parse_int(s: u8[:], base: i64 = 10) -> i64, bool        // optional sign, whole string; false outside i64
-fn parse_flt(s: u8[:]) -> f64, bool                        // sign, fraction, exponent
+fn parse_flt(s: u8[:]) -> f64, bool                        // sign, fraction, exponent; correctly rounded
 fn format_uleb(out: u8[>..]&, v: i64)                     // LEB128 (3.6), 1-10 bytes
 fn parse_uleb(s: u8[:]) -> i64, i64                       // value and byte count; 0, 0 if malformed
 fn compare(a: u8[:], b: u8[:]) -> i64                      // bytewise: -1, 0, 1
@@ -372,7 +373,9 @@ fn push_utf8(out: u8[>..]&, cp: i64)
 The builtins `format`/`str`/`print` do the plain rendering of scalars and
 strings; the functions here add control over the output, and parsing. In
 base 10, `format_int` and `format_uint` write the same text as `format`
-(after any padding) and run as fast. Strings are `u8` arrays: input is a
+(after any padding) and run as fast. `parse_flt` gives the double nearest to
+the decimal, as C's `strtod` does, so a float's text from `print` or
+`format` reads back as the same value. Strings are `u8` arrays: input is a
 `u8[:]`, output goes to a `u8[>..]&` builder, and storage is a `u8[]` or
 `u8[..k]`.
 

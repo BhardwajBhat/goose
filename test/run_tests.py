@@ -1765,6 +1765,24 @@ def main():
         else:
             r.ok(f"member stores {f.name}")
     r.show_task(member_stores)
+    # A constant array of listed elements is static data at any length, and
+    # a long fill keeps its runtime initialization (MAXSTATICELEMS).
+    def static_arrays():
+        f = HERE / "codegen" / "const_global_folding.goose"
+        cfile = gendir / "const_global_folding-static.c"
+        code, out, err = r.goose("-O1", "-o", cfile, f)
+        if code != 0:
+            r.fail(f"static arrays {f.name}", out + err)
+            return
+        text = cfile.read_text()
+        listed = re.search(r"^static const a260_i64 LONG_g\w* = ", text, re.MULTILINE)
+        filled = re.search(r"^static const \w+ FILLED_g", text, re.MULTILINE)
+        if not listed or filled:
+            r.fail(f"static arrays {f.name}",
+                   f"LONG static: {bool(listed)}, FILLED static: {bool(filled)}")
+        else:
+            r.ok(f"static arrays {f.name}")
+    r.show_task(static_arrays)
 
     # Every annotated regression, including the expected-abort cases. These
     # describe the default O1 pass; O0/O2 execution checks semantics.
