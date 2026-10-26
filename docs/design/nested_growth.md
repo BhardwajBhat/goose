@@ -39,6 +39,8 @@ a recommendation.
   - [4.3 Option C: a runtime check that the container is on top](#43-option-c-a-runtime-check-that-the-container-is-on-top)
   - [4.4 Option D: a pool of linked nodes (today's json::Node)](#44-option-d-a-pool-of-linked-nodes-todays-jsonnode)
   - [4.5 Options rejected: a stack per container, memmove insertion](#45-options-rejected-a-stack-per-container-memmove-insertion)
+  - [4.6 Option E: append handles, a checked push through a reference](#46-option-e-append-handles-a-checked-push-through-a-reference)
+  - [4.7 The options side by side](#47-the-options-side-by-side)
 - [5. Costs shared by every in-place option](#5-costs-shared-by-every-in-place-option)
 - [6. Prior art](#6-prior-art)
 - [7. Recommendation](#7-recommendation)
@@ -75,8 +77,8 @@ design decision is which of two things the feature is for:
 * **Depth-first building**: parsers, deserializers, builders, serializers,
   anything that produces a tree in traversal order. The result is one
   contiguous flat value: no links, so it can be serialized with `to_bytes`
-  as is and sent to a worker, since it is flat. Sections 3 and 4.1 to 4.3
-  are about this.
+  as is and sent to a worker, since it is flat. Section 3 and sections 4.1
+  to 4.3 and 4.6 are about this.
 * **Random mutation**: an editable document model, where a member is added
   to an object long after its siblings were. This is a pool of linked
   nodes, section 4.4, and it exists.
@@ -132,10 +134,17 @@ chain.
   walks it.
 * Everything the compiler generates per type by walking its fields (size,
   equality, `print`/`format`, `copy`, the `from_bytes` verifier) becomes a
-  recursive C function instead of an unrolled expression. The checker's
-  deferred-type machinery (`typesbuilding`, `laterpointees` in
-  `src/typecheck_types.h`) already handles cycles through references and
-  needs to admit by-value ones.
+  recursive C function instead of an unrolled expression, **for the types
+  that are recursive and no others**. The by-value containment graph has
+  the answer: a type is recursive when it lies on a cycle of that graph
+  (a nontrivial strongly connected component), and only those types get
+  recursive walkers. A type that merely contains a recursive one (`struct
+  Doc { name: u8[], root: Json.. }`) keeps its unrolled walker, which
+  calls `Json`'s. Every type the compiler handles today is off every
+  cycle and compiles exactly as now. The checker's deferred-type
+  machinery (`typesbuilding`, `laterpointees` in `src/typecheck_types.h`)
+  already handles cycles through references and needs to admit by-value
+  ones.
 * Those walkers recurse on the native stack to the data's depth. A
   hostile document can be nested a million deep, and `print(doc)` would
   then overflow the native stack. Every JSON library caps depth for this
@@ -204,6 +213,19 @@ in place from its declaration. **Cons.** A type that says resizable and is
 frozen in most of its instances; every class-keyed rule needs the element
 refinement. (a) is the conservative fallback if that audit turns up too
 much.
+
+**Which has fewer side effects.** (a) touches fewer rules but leaves a hole
+that the append handles of section 4.6 cannot fill: a `var doc: Json..`
+whose arrays are `[]` is a variable-class local, and a variable local may
+be buried under later allocations on its stack once built (§1.3(4)), so
+nothing can ever grow it, handle or no handle. Growing from a declaration
+needs the root to own its stack top, which means resizable class, which
+means `[>..]` in the declaration, which is (b). The audit for (b) reduces
+to one predicate: **a `[>..]` in element position is a `[]` for every
+rule except the two that grow it**, the checked push through a reference
+(4.6) and the statically proven push on the open path (4.1). Placement,
+copying, whole assignment, shrink receivers, frame objects and
+`SoleResizableIn` all take the `[]` answer.
 
 A count that is patched in place as children close must be fixed-width. A
 `Json..[varint]` container could be built in one expression (its length is
@@ -393,6 +415,138 @@ it is not the declaration the question started from.
   the insertion point do not. Sound only with no references into the tape
   at all, which gives up the thing Goose holds instead of indices.
 
+### 4.6 Option E: append handles, a checked push through a reference
+
+The idea: a handle on a nested container, holding the array and the end of
+its storage, obtained whenever the program likes,
+
+```goose
+var doc: Json.. = Json.Obj { members: [] };
+let ra = doc.members.appender();
+let m .= ra.push(Member { key: "tags", val: Json.Arr { children: [] } });
+let ta = m.val.children.appender();         // through Arr &a, or a case function
+ta.push(Json.Str { s: "flat" });
+ra.push(Member { key: "n", val: Json.Num { v: 1.0 } });   // back to the parent
+ta.push(Json.Null);                                          // aborts: tags is closed
+```
+
+where `push` through a handle is an ordinary push after one comparison of
+the handle's end with the stack top, and aborts when they differ. No open,
+no close, no required code shape: the growth point is chosen at run time
+among the containers on the open path, and a program may hold as many
+handles as it likes. Option C's difficulty, knowing a container's end, is
+answered by caching it in the handle at the one moment it is known.
+
+**The cached end goes stale.** The version just described rejects the
+example above at the fourth push. After `ta.push`, the tags array has
+grown, so the member holding it has grown, so `doc.members` has grown: its
+end is the stack top again, but `ra` still caches the end as it was when
+the member was pushed. Every container on the open path ends at the top,
+so when a descendant grows, every ancestor's cached end is stale although
+every ancestor is still appendable. A handle that aborted on a stale end
+would reject precisely the use handles exist for, returning to a parent
+after building a child. The cached end can only be a fast path; the slow
+path has to re-derive the answer.
+
+**A sound and cheap form.** A handle is `{ count pointer, stack, end,
+last }`, with `last` the start of the last element pushed through it.
+`push` is then:
+
+1. `end == top`: push. This is the usual case and the branch predicts it.
+2. Otherwise walk the last element with the type's size walker (which R1
+   generates): if `last + size(last) == top`, every byte since `end` lies
+   inside that element, so the container is still on the open path; set
+   `end = top` and push. If not, something was appended after the
+   container, and the push aborts, naming the container and where the
+   foreign bytes start. An empty container has no last element and aborts
+   here outright.
+
+The argument that this is sound: a push is atomic (the count is written
+after the element's bytes, as today), so between statements the tape is
+complete up to the top; the walk reads only counted elements; and a
+successful push through any handle implies its container is on the open
+path, so the bytes it adds are the container's. The handle's correctness
+rests on nothing outside the handle: no per-stack pointer, no scope-exit
+hook. So handles are fixed-size values that may be copied and stored
+anywhere a reference may, and a stale copy merely takes the slow path. The
+check must be exactly right rather than best-effort: a push accepted into a
+closed container would bump a count whose bytes are now a sibling's, and
+the walkers would then read that sibling as a child, which is type
+confusion inside a packed tape. Deriving the answer from the tape is what
+rules that out.
+
+The slow path costs a walk of the last child's subtree each time a parent
+is resumed, so a parser built from handles alone re-reads each subtree once
+per ancestor level, about `depth` times the parse's own reads. Where the
+child's handle is still at hand, which the depth-first parser's own stack
+guarantees, `parent.resume(child)` is O(1) and equally sound: `child.end
+== top` and the child's array lies inside the parent's last element
+(`parent.last <= child.array < top`) together imply that everything since
+the parent's cached end is inside that element. Creating a handle is O(1)
+on an empty container or on the element just pushed, and otherwise a walk
+of the container, which doubles as the check that it is appendable at all;
+that is the "call it when it is cheap" instinct, made precise.
+
+A linked alternative (handles pointing at their parent handle, and the
+stack keeping a pointer to the last pusher) makes every path O(1), but a
+stale per-stack pointer into popped storage could validate a closed
+container, so it needs handles confined to variables and a hook at every
+handle's scope exit. The derived form needs none of that and is the one to
+build.
+
+**What it buys.** Three things the static options cannot do:
+
+* A data-dependent growth point. A `[>..<]` of handles is the explicit
+  open stack, so the iterative, any-depth parser that `json::parse` is
+  today can be written over the tape form.
+* Recursion with no change to §7.8: `recursive fn value(r: Reader&, into:
+  Json..[>..]&)` pushes the node into `into`, binds its payload by
+  reference and recurses on `a.children`. Every handle is rooted at `doc`
+  outside the cycle, and no activation declares a nonfixed local. The
+  checker's growth summaries must learn that a nested array's growth is
+  its root's stack's growth, which Option A needs too.
+* No partial values. Every statement boundary sees a complete tree, since
+  a push is atomic, where a builder block leaves its element incomplete
+  across the block's statements.
+
+**What it costs.** One register comparison per push, mispredicted once per
+return to a parent; the write of the in-tape count; a four-word reference
+form. And the failure is dynamic: whether a handle is still usable depends
+on the order of pushes, and a program that holds many handles and appends
+in a data-dependent order finds out under test, not at compile time. That
+is the one place this breaks with the rest of the language. "Append
+anywhere" still means anywhere on the open path: a closed sibling is
+closed, and the abort says so.
+
+**The same operation as Option A.** A push through a handle and a push in
+a builder block or a named-result recursion add the same bytes to the same
+stack. The difference is that in Option A the checker has *proved* the
+container is on the open path (it is the element the block is building, or
+the result the activation is constructing), so the comparison can be
+dropped. That makes Option A the check elimination for Option E, exactly as
+bounds-check elimination (§10.5) is for indexing, and the same conventions
+carry over: the check stays unless proven away, `checkfree fn` can demand
+that none remain, and a debug build can keep the check in a push the
+checker elided, as an oracle for the proof. The `with` block the idea came
+with (`ra.with() { … unchecked pushes … }`) is Option A's builder block
+entered from a handle: one check at entry, no comparison inside, and the
+growth log statically forbidding any other growth of that stack within the
+block.
+
+### 4.7 The options side by side
+
+| | A: construction order | B: flow-tracked handles | C: runtime top check | E: append handles | D: linked pool |
+|---|---|---|---|---|---|
+| Growth point | innermost open element, by source structure | static handles, by flow | any container on the open path | any container on the open path | any container, any time |
+| Decided | at compile time | at compile time | at run time | at run time, elided where A proves it | n/a |
+| Per-push cost | none | none | compare, plus an explicit close | compare; a walk or O(1) resume on return to a parent | a link store; 8 bytes a node |
+| Failure | compile error | compile error | abort | abort | none |
+| Any-depth iterative parse | no | no | yes | yes | yes |
+| Recursive parse needs | §7.8 relaxation | §7.8 relaxation | nothing | nothing | nothing |
+| Partial values visible | inside the block | while open | no | no | n/a |
+| Checker work | medium | high | low | low | done |
+| Result | one flat value | one flat value | one flat value | one flat value | three arrays with links |
+
 ## 5. Costs shared by every in-place option
 
 * **The resizable-ADT payload gap** (section 2) is on the critical path:
@@ -445,19 +599,24 @@ it is not the declaration the question started from.
 
 ## 7. Recommendation
 
-1. **R1 first** (section 3.1): recursion through an array. It stands on its
+1. **R1 first** (section 3.1): recursion through an array, with recursive
+   walkers only for the types on a containment cycle. It stands on its
    own, it makes frozen trees expressible, and the result-construction
    machinery already builds them in place a fixed number of levels deep.
-   The work is in the generated walkers and the deferred-type machinery.
-2. **R2 as (b)** (section 3.2) together with **Option A through results**
-   (section 4.1): the §7.8 relaxation for a named result built at the
-   destination, plus closing the resizable-ADT payload gap. That is the
-   point at which the recursive-descent JSON builder in section 4.1 compiles
-   and runs on one stack. Builder blocks come after, for the imperative
-   form; they reuse the same open-element root.
-3. **Keep `json::Node`** as the mutable, key-addressable document model;
+   The size walker it generates is also what Option E's slow path runs.
+2. **R2 as (b)** (section 3.2), since (a) cannot grow a root from its
+   declaration, with the audit reduced to the one predicate above. Close
+   the resizable-ADT payload gap at the same time; every option needs it.
+3. **Option E as the mechanism, Option A as its check elimination.** Build
+   the checked push through a reference to a nested array first: it is the
+   smaller checker change, it delivers the whole feature (the recursive
+   and the iterative JSON tape parser, hand-built trees, handles stored in
+   a stack), and it defines the semantics that the elision must preserve.
+   Then teach the checker the two proofs that drop the comparison, the
+   builder block and the named result in a recursion (the §7.8 relaxation),
+   with the check kept in debug builds as the oracle. `checkfree fn` then
+   covers appends as it covers indexing.
+4. **Keep `json::Node`** as the mutable, key-addressable document model;
    do not try to make the tape mutable.
-4. **Hold Option C** in reserve. Decide on it only if an any-depth iterative
-   parser over the tape form is needed and a depth cap on the recursive one
-   is not acceptable. Skip Option B unless a program needs an open container
-   across a function boundary that a block or a result cannot span.
+5. **Drop Options B and C.** E subsumes C (it is C with the end problem
+   solved) and gives B's flexibility without its typestate.
