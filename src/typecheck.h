@@ -411,7 +411,7 @@ struct TypeCheck {
     enum HoldKind { HK_NONE, HK_VALUE, HK_VIEW, HK_ELEMS, HK_RECEIVER, HK_LOCATION,
                     HK_SEQUENCE };
     template<typename F> void ForOperands(Node *n, F f);
-    int OperandIndex(Node *parent, Node *child);
+    int OperandIndex(Node *parent, Node *child, int next = -1);
     // A value evaluated earlier in the statement and still live: a reference
     // or slice, a view of an array's elements, a holder's references, or an
     // assignment's location, which is only the slot the value lands in (what
