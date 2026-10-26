@@ -60,7 +60,7 @@ goose example.goose
 which compiles the program into the compiler's own process and runs it
 there, with no C compiler and no build step. `goose check` typechecks
 without running, and `goose build` makes an executable
-([packages.md](packages.md) has the rest of the command line).
+([command_line.md](command_line.md) has the rest of the command line).
 
 ---
 

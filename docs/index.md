@@ -21,9 +21,12 @@ specification. The other documents cover the library, tools, and compiler.
   `exception`, and `gfx`, `audio`, `physics` and `ui` for graphics, sound,
   rigid bodies and widgets. All are written in readable Goose under
   `stdlib/`.
-* [Building programs and using packages](packages.md): `goose build`,
-  libraries from git repositories or directories, a program's own C, and
-  how to make a package.
+* [The command line](command_line.md): every command and option of
+  `goose`: running, building and checking programs, what the compiler
+  prints, writing the C yourself, the formatter and the language server.
+* [Building programs and using packages](packages.md): libraries from git
+  repositories or directories, a program's own C, and how to make a
+  package.
 * [Samples](../samples/README.md): thirty-one complete programs in reading
   order, from a tour of the language to a JSON parser, a threaded
   Mandelbrot, a spinning cube and two small games.

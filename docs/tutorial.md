@@ -95,8 +95,9 @@ goose build hello.goose && ./hello
 
 `goose -o hello.c hello.goose` writes the C for you to build yourself, and
 `goose build --dry-run hello.goose` prints the commands.
-[packages.md](packages.md) describes the rest of `goose build`, and how a
-program uses libraries from other repositories.
+[command_line.md](command_line.md) describes the rest of `goose build` and
+the other commands, and [packages.md](packages.md) how a program uses
+libraries from other repositories.
 
 The bundled TinyCC backend needs no separate C compiler. With no verb, or
 with `goose run`, the program is compiled into the compiler's own process and
