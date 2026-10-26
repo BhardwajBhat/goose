@@ -75,6 +75,9 @@ and the reference describe what was built; these say why.
 * [Cleanup at scope exit](design/scope_exit_cleanup.md): `defer`,
   destructor types and pool finalizers compared against the compiler's
   exit paths and `return … from`; a proposal.
+* [Nested growth](design/nested_growth.md): building a recursive tree
+  (a JSON tape) in place on one stack, growing the innermost open
+  container; the type relaxations and open-path options compared.
 * [Standard library design](design/stdlib_design.md): the library's
   original scope and conventions.
 * [Compiler analyses](design/analysis_inventory.md): an inventory of the
