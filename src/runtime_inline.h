@@ -11,7 +11,7 @@ struct RuntimeFile {
 inline const RuntimeFile runtime_files[] = {
     { "runtime.h", string_view(
 R"GSRT(/* Goose runtime — the part every compiler-generated C file starts with.
-   Plain C99 (+ #pragma pack, unaligned scalar access); compiles with MSVC,
+   Plain C99 (+ #pragma pack, alignment typedefs); compiles with MSVC,
    gcc, clang, and tcc. Kept deliberately small: per-operation behavior (push,
    indexing, field access) is emitted inline by the compiler; only genuinely
    shared machinery lives in the runtime (data stacks, varints, printing,
@@ -67,6 +67,25 @@ R"GSRT(/* Goose runtime — the part every compiler-generated C file starts with
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+/* Goose values can start at any byte, including scalars reached through a
+   reference or slice. GCC and Clang must retain that alignment on the
+   pointee type, even after taking a packed member's address. MSVC and
+   TinyCC already permit these accesses on the supported targets. The
+   aliases keep the underlying C types and their calling conventions. */
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(__TINYC__)
+#define GS_ALIGN1 __attribute__((aligned(1)))
+#else
+#define GS_ALIGN1
+#endif
+typedef int16_t gs_i16 GS_ALIGN1;
+typedef int32_t gs_i32 GS_ALIGN1;
+typedef int64_t gs_i64 GS_ALIGN1;
+typedef uint16_t gs_u16 GS_ALIGN1;
+typedef uint32_t gs_u32 GS_ALIGN1;
+typedef uint64_t gs_u64 GS_ALIGN1;
+typedef float gs_f32 GS_ALIGN1;
+typedef double gs_f64 GS_ALIGN1;
 
 /* Every float operation rounds on its own. A C compiler may otherwise
    contract a multiply and an add into one fused rounding wherever the target
@@ -185,7 +204,8 @@ enum {
     GS_E_RESIZEFILL,   /* resize growth requires a fill value */
     GS_E_RESIZENEG,    /* resize to a negative length */
     GS_E_POP,          /* pop on empty array */
-    GS_E_THREADID,     /* thread_wait on an unknown thread id */
+)GSRT"
+R"GSRT(    GS_E_THREADID,     /* thread_wait on an unknown thread id */
     GS_E_THREADSELF,   /* a worker cannot wait for itself */
     GS_E_TAG,          /* corrupt ADT tag (debug builds only) */
     GS_E_ENDIAN,       /* serialization on a big-endian host */
@@ -394,7 +414,8 @@ R"GSRT(    (GS_KSZ(n, 8, 8) ? (void)(GS_AT(uint64_t, d, 0) = 0) \
      : GS_KSZ(n, 4, 4) ? (void)(GS_AT(uint32_t, d, 0) = 0) \
      : GS_KSZ(n, 1, 1) ? (void)(GS_AT(uint8_t, d, 0) = 0) \
      : GS_KSZ(n, 2, 2) ? (void)(GS_AT(uint16_t, d, 0) = 0) \
-     : GS_KSZ(n, 3, 3) ? (void)(GS_AT(uint16_t, d, 0) = 0, GS_AT(uint8_t, d, 2) = 0) \
+)GSRT"
+R"GSRT(     : GS_KSZ(n, 3, 3) ? (void)(GS_AT(uint16_t, d, 0) = 0, GS_AT(uint8_t, d, 2) = 0) \
      : GS_KSZ(n, 5, 7) ? (void)(GS_AT(uint32_t, d, 0) = 0, GS_AT(uint32_t, d, (n) - 4) = 0) \
      : GS_KSZ(n, 9, 16) ? (void)(GS_AT(uint64_t, d, 0) = 0, GS_AT(uint64_t, d, (n) - 8) = 0) \
      : GS_KSZ(n, 17, 32) ? (void)(GS_AT(uint64_t, d, 0) = 0, GS_AT(uint64_t, d, 8) = 0, \
@@ -559,7 +580,8 @@ R"GSRT(static T gs_div_##SFX(T a, T b, const char *file, int line) { \
     if (r < (MIN) || r > (MAX)) gs_ovf(a, "/", b, #SFX, file, line); \
     return (T)r; }
 GS_DIVOPS_S(i8, int8_t, -128, 127)
-GS_DIVOPS_S(i16, int16_t, -32768, 32767)
+)GSRT"
+R"GSRT(GS_DIVOPS_S(i16, int16_t, -32768, 32767)
 GS_DIVOPS_S(i32, int32_t, INT32_MIN, INT32_MAX)
 #else
 #define gs_div_i8(a, b, f, l)  GS_DIVS(int8_t, a, b, f, l)
@@ -735,7 +757,8 @@ R"GSRT(    unsigned __int128 n = (unsigned __int128)hi << 64;
 #elif defined(_MSC_VER) && _MSC_VER >= 1920 && defined(_M_X64)
 #include <intrin.h>
 #define GS_HAVE_U128 1
-static uint64_t gs_mulhi_u64(uint64_t a, uint64_t b) { return __umulh(a, b); }
+)GSRT"
+R"GSRT(static uint64_t gs_mulhi_u64(uint64_t a, uint64_t b) { return __umulh(a, b); }
 static uint64_t gs_div128_u64(uint64_t hi, uint64_t d, uint64_t *rem) {
     return _udiv128(hi, 0, d, rem);
 }
@@ -930,7 +953,8 @@ R"GSRT(    const char *name, *onwindows, *onmacos, *onlinux;
 /* One function: its library's index in the table, the symbol the library
    is asked for, and the pointer the generated code calls through. */
 typedef struct gs_dlbind {
-    int32_t lib;
+)GSRT"
+R"GSRT(    int32_t lib;
     const char *sym;
     void **slot;
 } gs_dlbind;
@@ -1122,7 +1146,8 @@ R"GSRT(#define GS_ULEB_READ(p) ((*(p) & 0x80) ? gs_uleb_read_slow(p) : (int64_t)
 static int64_t gs_uleb_write(uint8_t *p, uint64_t v) {
     uint8_t *q = p;
     for (;;) {
-        uint8_t b = v & 0x7f;
+)GSRT"
+R"GSRT(        uint8_t b = v & 0x7f;
         v >>= 7;
         if (v) *q++ = b | 0x80; else { *q++ = b; break; }
     }
