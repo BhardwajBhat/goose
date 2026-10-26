@@ -1,7 +1,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/logo/logo_white_fg_trans_bg_mini.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/logo/logo_black_fg_white_bg_mini.png">
-  <img alt="The Goose programming language" src="docs/logo/logo_white_fg_black_bg_mini.png">
+  <img alt="The Goose programming language" src="docs/logo/logo_black_fg_white_bg_mini.png">
 </picture>
 
 # The Goose Programming Language
