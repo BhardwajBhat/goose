@@ -67,6 +67,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         endif()
         string(APPEND tcc_config "#define CONFIG_TRIPLET \"${tcc_triplet}\"\n")
     endif()
+    # Use separate writable and executable file mappings on SELinux systems.
+    if(EXISTS "/sys/fs/selinux/enforce")
+        string(APPEND tcc_config "#define CONFIG_SELINUX 1\n")
+    endif()
 endif()
 # macOS has no /usr/include: the C library's headers are only in the SDK, so
 # name its include directory as TinyCC's configure does. (The libraries need no
